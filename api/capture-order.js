@@ -3,12 +3,13 @@ require('dotenv').config();
 
 module.exports = async (req, res) => {
   // Set CORS headers for cross-origin requests
-  // Allow both reeboksmartring.com and toff-reebok-ring.myshopify.com
+  // Allow both reeboksmartring.com (with and without www) and toff-reebok-ring.myshopify.com
   const allowedOrigins = [
     'https://reeboksmartring.com',
+    'https://www.reeboksmartring.com',
     'https://toff-reebok-ring.myshopify.com'
   ];
-  
+
   const origin = req.headers.origin;
   if (allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
@@ -16,7 +17,7 @@ module.exports = async (req, res) => {
     // Default to the first allowed origin for direct API access
     res.setHeader('Access-Control-Allow-Origin', 'https://reeboksmartring.com');
   }
-  
+
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -233,9 +234,9 @@ async function getAwaitingSizeItems(email, orderId) {
         );
 
         const metafields = metafieldsResponse.data.metafields;
-        const awaitingSizeMetafield = metafields.find(metafield => 
-          metafield.namespace === 'custom' && 
-          metafield.key === 'awaiting_size' && 
+        const awaitingSizeMetafield = metafields.find(metafield =>
+          metafield.namespace === 'custom' &&
+          metafield.key === 'awaiting_size' &&
           metafield.value === true || metafield.value === 'true'
         );
 
@@ -255,13 +256,13 @@ async function getAwaitingSizeItems(email, orderId) {
           const variant = product.variants.find(v => v.id === lineItem.variant_id);
 
           // Get all variants for this product to show size options
-          const allVariants = product.variants.filter(v => 
+          const allVariants = product.variants.filter(v =>
             v.inventory_quantity > 0 && v.available
           );
 
           // Group variants by non-size options
           const options = product.options || [];
-          const sizeOptionIndex = options.findIndex(option => 
+          const sizeOptionIndex = options.findIndex(option =>
             option.name.toLowerCase().includes('size')
           );
 

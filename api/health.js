@@ -1,5 +1,19 @@
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', 'https://reeboksmartring.com');
+  // Set CORS headers for cross-origin requests
+  // Allow both reeboksmartring.com (with and without www)
+  const allowedOrigins = [
+    'https://reeboksmartring.com',
+    'https://www.reeboksmartring.com'
+  ];
+
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    // Default to the first allowed origin for direct API access
+    res.setHeader('Access-Control-Allow-Origin', 'https://reeboksmartring.com');
+  }
+
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
