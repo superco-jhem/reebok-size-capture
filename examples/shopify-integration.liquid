@@ -1,0 +1,619 @@
+{% comment %}
+  Shopify Liquid template example for integrating with the Size Capture App
+  This template shows how to capture order data and send it to the Vercel API
+{% endcomment %}
+
+<div class="size-capture-container">
+  <h2>Get Your Ring Size</h2>
+  <p>We'll send you a free ring sizer to ensure the perfect fit for your order.</p>
+
+  <form id="size-capture-form" class="size-capture-form">
+    <div class="form-group">
+      <label for="customer-email">Email Address:</label>
+      <input
+        type="email"
+        id="customer-email"
+        name="email"
+        value="{{ customer.email }}"
+        required
+        readonly
+      >
+      <small>We'll use the email from your account</small>
+    </div>
+
+    <div class="form-group">
+      <label for="order-selection">Select Your Order:</label>
+      <select id="order-selection" name="orderId" required>
+        <option value="">Loading your orders...</option>
+      </select>
+      <small>Choose the order you want to get a ring sizer for</small>
+    </div>
+
+    <div class="form-group" id="awaiting-size-items-container" style="display: none;">
+      <label>Products Awaiting Size:</label>
+      <div id="awaiting-size-items">
+        <!-- Items will be populated here -->
+      </div>
+      <small>Select the size for each product that needs sizing</small>
+    </div>
+
+    <button type="submit" class="btn btn-primary" disabled>
+      <span class="btn-text">Get Free Ring Sizers</span>
+      <span class="btn-loading" style="display: none;">
+        <span class="spinner"></span> Processing...
+      </span>
+    </button>
+  </form>
+
+  <div id="success-message" class="alert alert-success" style="display: none;">
+    <h3>🎉 Success!</h3>
+    <p>Your free ring sizers have been ordered. You'll receive a confirmation email shortly.</p>
+    <p><strong>Order Number:</strong> <span id="new-order-number"></span></p>
+  </div>
+
+  <div id="error-message" class="alert alert-danger" style="display: none;">
+    <h3>❌ Error</h3>
+    <p id="error-text">Something went wrong. Please try again.</p>
+  </div>
+</div>
+
+<style>
+.size-capture-container {
+  max-width: 800px;
+  margin: 2rem auto;
+  padding: 2rem;
+  border: 1px solid #e1e1e1;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.size-capture-form {
+  margin-top: 1.5rem;
+}
+
+.form-group {
+  margin-bottom: 1.5rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.form-group input,
+.form-group select {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+.form-group input[readonly] {
+  background-color: #f8f9fa;
+  color: #6c757d;
+}
+
+.form-group small {
+  display: block;
+  margin-top: 0.25rem;
+  color: #6c757d;
+  font-size: 0.875rem;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-height: 44px;
+}
+
+.btn-primary {
+  background-color: #007bff;
+  color: white;
+}
+
+.btn-primary:hover {
+  background-color: #0056b3;
+}
+
+.btn-primary:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
+}
+
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  border-top-color: transparent;
+  animation: spin 1s ease-in-out infinite;
+  margin-right: 0.5rem;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.alert {
+  padding: 1rem;
+  margin-top: 1.5rem;
+  border-radius: 4px;
+}
+
+.alert-success {
+  background-color: #d4edda;
+  border: 1px solid #c3e6cb;
+  color: #155724;
+}
+
+.alert-danger {
+  background-color: #f8d7da;
+  border: 1px solid #f5c6cb;
+  color: #721c24;
+}
+
+.alert h3 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+}
+
+/* Awaiting size items styling */
+.awaiting-size-item {
+  border: 1px solid #e1e1e1;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  background: #f8f9fa;
+}
+
+.awaiting-size-item-header {
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  color: #495057;
+  font-size: 1.1rem;
+}
+
+.awaiting-size-item-details {
+  font-size: 0.9rem;
+  color: #6c757d;
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background: white;
+  border-radius: 4px;
+  border: 1px solid #e9ecef;
+}
+
+.awaiting-size-item-details .detail-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
+}
+
+.awaiting-size-item-details .detail-row:last-child {
+  margin-bottom: 0;
+}
+
+.awaiting-size-item-details .detail-label {
+  font-weight: 500;
+  color: #495057;
+}
+
+.awaiting-size-item-details .detail-value {
+  color: #6c757d;
+}
+
+.size-selection-group {
+  margin-top: 1rem;
+}
+
+.size-selection-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: #495057;
+}
+
+.size-selection-dropdown {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 1rem;
+  background: white;
+  cursor: pointer;
+}
+
+.size-selection-dropdown:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+.size-option-item {
+  padding: 0.5rem;
+}
+
+.loading-message {
+  text-align: center;
+  padding: 2rem;
+  color: #6c757d;
+  font-style: italic;
+}
+
+.error-message {
+  color: #dc3545;
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+}
+
+.no-orders-message {
+  text-align: center;
+  padding: 2rem;
+  color: #6c757d;
+  font-style: italic;
+}
+
+.no-awaiting-size-message {
+  text-align: center;
+  padding: 1rem;
+  color: #6c757d;
+  font-style: italic;
+  background: #f8f9fa;
+  border-radius: 4px;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const form = document.getElementById('size-capture-form');
+  const submitBtn = form.querySelector('button[type="submit"]');
+  const btnText = submitBtn.querySelector('.btn-text');
+  const btnLoading = submitBtn.querySelector('.btn-loading');
+  const successMessage = document.getElementById('success-message');
+  const errorMessage = document.getElementById('error-message');
+  const newOrderNumber = document.getElementById('new-order-number');
+  const errorText = document.getElementById('error-text');
+  const orderSelection = document.getElementById('order-selection');
+  const awaitingSizeItemsContainer = document.getElementById('awaiting-size-items-container');
+  const awaitingSizeItems = document.getElementById('awaiting-size-items');
+
+  // Replace with your actual Vercel app URL
+  const API_BASE_URL = 'https://reebok-ring-size-capture-62bakbvfp-jhem-9626s-projects.vercel.app';
+
+  // Get the customer email from the current page context
+  const customerEmail = '{{ customer.email }}';
+
+  let selectedVariants = {}; // Store selected variants for each item
+  let awaitingSizeItemsData = []; // Store the awaiting size items data
+
+  // Load orders when page loads
+  if (customerEmail) {
+    loadOrders(customerEmail);
+  }
+
+  async function loadOrders(email) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/capture-order?email=${encodeURIComponent(email)}`);
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        displayOrders(result.data.orders);
+      } else {
+        showError('Failed to load orders: ' + (result.error || 'Unknown error'));
+      }
+    } catch (error) {
+      // console.error('Failed to load orders:', error);
+      showError('Failed to load orders. Please refresh the page.');
+    }
+  }
+
+  function displayOrders(orders) {
+    // Filter out orders that already have size-provided tag
+    const availableOrders = orders.filter(order => {
+      const hasSizeProvidedTag = order.tags && order.tags.includes('size-provided');
+      return !hasSizeProvidedTag;
+    });
+
+    if (availableOrders.length === 0) {
+      orderSelection.innerHTML = '<option value="">No orders available for ring sizing</option>';
+      return;
+    }
+
+    let html = '<option value="">Select an order...</option>';
+    availableOrders.forEach(order => {
+      const orderDate = new Date(order.created_at).toLocaleDateString();
+      html += `<option value="${order.name}">${order.name} - ${orderDate} - $${order.total_price}</option>`;
+    });
+
+    orderSelection.innerHTML = html;
+  }
+
+  async function loadAwaitingSizeItems(email, orderId) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/capture-order?email=${encodeURIComponent(email)}&orderId=${encodeURIComponent(orderId)}`);
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        awaitingSizeItemsData = result.data.awaitingSizeItems;
+        await displayAwaitingSizeItems(awaitingSizeItemsData);
+      } else {
+        showError('Failed to load awaiting size items: ' + (result.error || 'Unknown error'));
+      }
+    } catch (error) {
+      // console.error('Failed to load awaiting size items:', error);
+      showError('Failed to load awaiting size items. Please try again.');
+    }
+  }
+
+  async function displayAwaitingSizeItems(items) {
+    if (items.length === 0) {
+      awaitingSizeItems.innerHTML = '<div class="no-awaiting-size-message">No products in this order require size selection.</div>';
+      awaitingSizeItemsContainer.style.display = 'block';
+      submitBtn.disabled = true;
+      return;
+    }
+
+    let html = '';
+    selectedVariants = {}; // Reset selections
+
+    for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+      const item = items[itemIndex];
+      const itemId = `item-${itemIndex}`;
+      selectedVariants[itemId] = null; // Initialize
+
+      try {
+        // Fetch product JSON data
+        const productJsonResponse = await fetch(`/products/${item.product.handle}/?view=product-json`);
+
+        if (!productJsonResponse.ok) {
+          throw new Error(`Failed to fetch product JSON: ${productJsonResponse.status} - ${productJsonResponse.statusText}`);
+        }
+
+        const productData = await productJsonResponse.json();
+
+        // Validate product data structure
+        if (!productData || !productData.options_with_values || !productData.variants) {
+          throw new Error('Invalid product JSON structure - missing required fields');
+        }
+
+        // Find the size option index
+        const sizeOptionIndex = productData.options_with_values.findIndex(option =>
+          option.name.toLowerCase().includes('size')
+        );
+
+        if (sizeOptionIndex === -1) {
+          throw new Error(`No size option found for product: ${item.product.title}`);
+        }
+
+        // Get all available sizes (excluding "Awaiting Size")
+        const sizeOption = productData.options_with_values[sizeOptionIndex];
+        const availableSizes = sizeOption.values.filter(size =>
+          size.toLowerCase() !== 'awaiting size'
+        );
+
+        if (availableSizes.length === 0) {
+          throw new Error('No available sizes found (excluding "Awaiting Size")');
+        }
+
+        // Create size options for dropdown
+        let sizeOptionsHtml = '<option value="">Select a size...</option>';
+        availableSizes.forEach((size, sizeIndex) => {
+          const isSelected = sizeIndex === 0; // Select first size by default
+          if (isSelected) {
+            // Find the variant ID for the selected size with original non-size options
+            const variantId = findVariantId(productData, item.originalNonSizeOptions, size, sizeOptionIndex);
+            selectedVariants[itemId] = variantId;
+          }
+          sizeOptionsHtml += `<option value="${size}" ${isSelected ? 'selected' : ''}>${size}</option>`;
+        });
+
+        // Create non-size options display
+        const nonSizeOptionsHtml = Object.entries(item.originalNonSizeOptions)
+          .map(([key, value]) => `<div class="detail-row"><span class="detail-label">${key}:</span><span class="detail-value">${value}</span></div>`)
+          .join('');
+
+        html += `
+          <div class="awaiting-size-item">
+            <div class="awaiting-size-item-header">${item.product.title}</div>
+            <div class="awaiting-size-item-details">
+              <div class="detail-row">
+                <span class="detail-label">Original Variant:</span>
+                <span class="detail-value">${item.originalVariant.title}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Price:</span>
+                <span class="detail-value">$${item.originalVariant.price}</span>
+              </div>
+              ${nonSizeOptionsHtml}
+            </div>
+            <div class="size-selection-group">
+              <label class="size-selection-label" for="size-select-${itemId}">Select Size:</label>
+              <select class="size-selection-dropdown" id="size-select-${itemId}" data-item-id="${itemId}" data-product-data='${JSON.stringify(productData)}' data-size-option-index="${sizeOptionIndex}">
+                ${sizeOptionsHtml}
+              </select>
+            </div>
+          </div>
+        `;
+
+      } catch (error) {
+        // console.error(`Error loading product data for ${item.product.handle}:`, error);
+
+        // Show error for this specific item
+        html += `
+          <div class="awaiting-size-item">
+            <div class="awaiting-size-item-header">${item.product.title}</div>
+            <div class="error-message">
+              Error loading product data: ${error.message}
+              <br><small>Product handle: ${item.product.handle}</small>
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    awaitingSizeItems.innerHTML = html;
+    awaitingSizeItemsContainer.style.display = 'block';
+
+    // Enable submit button if we have items
+    submitBtn.disabled = false;
+
+    // Add dropdown change listeners
+    document.querySelectorAll('.size-selection-dropdown').forEach(dropdown => {
+      dropdown.addEventListener('change', function() {
+        const itemId = this.getAttribute('data-item-id');
+        const selectedSize = this.value;
+        const productData = JSON.parse(this.getAttribute('data-product-data'));
+        const sizeOptionIndex = parseInt(this.getAttribute('data-size-option-index'));
+
+        // Find the original non-size options for this item
+        const originalItem = awaitingSizeItemsData.find((_, index) => `item-${index}` === itemId);
+
+        if (originalItem && selectedSize) {
+          // Find the variant ID for the selected size with original non-size options
+          const variantId = findVariantId(productData, originalItem.originalNonSizeOptions, selectedSize, sizeOptionIndex);
+          selectedVariants[itemId] = variantId;
+        } else {
+          selectedVariants[itemId] = null;
+        }
+      });
+    });
+  }
+
+  function findVariantId(productData, originalNonSizeOptions, selectedSize, sizeOptionIndex) {
+    // Find the variant that matches the original non-size options + selected size
+    const matchingVariant = productData.variants.find(variant => {
+      // Check if the size matches (using option2 for size based on your JSON structure)
+      const variantSize = variant.option2; // Size is option2 in your JSON
+      if (variantSize !== selectedSize) {
+        return false;
+      }
+
+      // Check if the colour matches (using option1 for colour based on your JSON structure)
+      const variantColour = variant.option1; // Colour is option1 in your JSON
+      const originalColour = originalNonSizeOptions['Colour']; // Assuming 'Colour' is the key
+
+      if (variantColour !== originalColour) {
+        return false;
+      }
+
+      return true;
+    });
+
+    return matchingVariant ? matchingVariant.id : null;
+  }
+
+  function showError(message) {
+    errorText.textContent = message;
+    errorMessage.style.display = 'block';
+    errorMessage.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  // Order selection change handler
+  orderSelection.addEventListener('change', function() {
+    const selectedOrderId = this.value;
+
+    if (selectedOrderId && customerEmail) {
+      loadAwaitingSizeItems(customerEmail, selectedOrderId);
+    } else {
+      awaitingSizeItemsContainer.style.display = 'none';
+      submitBtn.disabled = true;
+    }
+  });
+
+  form.addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const selectedOrderId = orderSelection.value;
+    if (!selectedOrderId) {
+      errorText.textContent = 'Please select an order.';
+      errorMessage.style.display = 'block';
+      return;
+    }
+
+    // Check if all items have selected variants
+    const missingSelections = Object.entries(selectedVariants).filter(([key, value]) => !value);
+    if (missingSelections.length > 0) {
+      errorText.textContent = 'Please select a size for all products.';
+      errorMessage.style.display = 'block';
+      return;
+    }
+
+    // Show loading state
+    submitBtn.disabled = true;
+    btnText.style.display = 'none';
+    btnLoading.style.display = 'inline-flex';
+
+    // Hide previous messages
+    successMessage.style.display = 'none';
+    errorMessage.style.display = 'none';
+
+    try {
+      // For now, we'll process the first selected variant
+      // In a full implementation, you might want to create multiple orders or handle multiple variants
+      const firstVariantId = Object.values(selectedVariants)[0];
+
+      const response = await fetch(`${API_BASE_URL}/api/capture-order`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: customerEmail,
+          orderId: selectedOrderId,
+          variantId: firstVariantId
+        })
+      });
+
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        // Show success message
+        newOrderNumber.textContent = result.data.newOrder;
+        successMessage.style.display = 'block';
+
+        // Reset form
+        form.reset();
+        awaitingSizeItemsContainer.style.display = 'none';
+
+        // Scroll to success message
+        successMessage.scrollIntoView({ behavior: 'smooth' });
+      } else {
+        // Show error message
+        errorText.textContent = result.error || 'Failed to process your request. Please try again.';
+        errorMessage.style.display = 'block';
+
+        // Scroll to error message
+        errorMessage.scrollIntoView({ behavior: 'smooth' });
+      }
+    } catch (error) {
+      // console.error('Request failed:', error);
+      errorText.textContent = 'Network error. Please check your connection and try again.';
+      errorMessage.style.display = 'block';
+      errorMessage.scrollIntoView({ behavior: 'smooth' });
+    } finally {
+      // Reset button state
+      submitBtn.disabled = false;
+      btnText.style.display = 'inline';
+      btnLoading.style.display = 'none';
+    }
+  });
+
+  // Auto-fill email if customer is logged in
+  if (customerEmail && customerEmail !== '') {
+    document.getElementById('customer-email').value = customerEmail;
+  }
+});
+</script>

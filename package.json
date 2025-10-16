@@ -1,0 +1,29 @@
+{
+  "name": "reebok-size-capture-app",
+  "version": "1.0.0",
+  "description": "Serverless Shopify app for capturing order data and creating discounted ring-size orders",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "@shopify/shopify-api": "^8.0.0",
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "@vercel/node": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "shopify",
+    "serverless",
+    "vercel",
+    "ecommerce"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}
