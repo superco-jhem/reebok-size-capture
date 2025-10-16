@@ -1,0 +1,755 @@
+const axios = require('axios');
+require('dotenv').config();
+
+module.exports = async (req, res) => {
+  // Set CORS headers for cross-origin requests
+  // Allow both reeboksmartring.com and toff-reebok-ring.myshopify.com
+  const allowedOrigins = [
+    'https://reeboksmartring.com',
+    'https://toff-reebok-ring.myshopify.com'
+  ];
+  
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    // Default to the first allowed origin for direct API access
+    res.setHeader('Access-Control-Allow-Origin', 'https://reeboksmartring.com');
+  }
+  
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400');
+
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+
+  // Handle GET requests
+  if (req.method === 'GET') {
+    try {
+      const { email, orderId, productId } = req.query;
+
+      // Get orders for an email
+      if (email && !orderId && !productId) {
+        const orders = await getOrdersByEmail(email);
+        res.status(200).json({
+          success: true,
+          data: { orders }
+        });
+        return;
+      }
+
+      // Get awaiting size items for a specific order
+      if (email && orderId && !productId) {
+        const awaitingSizeItems = await getAwaitingSizeItems(email, orderId);
+        res.status(200).json({
+          success: true,
+          data: { awaitingSizeItems }
+        });
+        return;
+      }
+
+      // Get variant options for a specific product (legacy support)
+      if (productId) {
+        const variantOptions = await getVariantOptionsForProduct(productId);
+        res.status(200).json({
+          success: true,
+          data: variantOptions
+        });
+        return;
+      }
+
+      return res.status(400).json({
+        error: 'Missing required parameters'
+      });
+
+    } catch (error) {
+      console.error('Error in GET request:', error);
+      res.status(500).json({
+        error: 'Internal server error',
+        message: error.message
+      });
+    }
+    return;
+  }
+
+  // Handle POST requests for order capture
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed. Use POST or GET.' });
+  }
+
+  try {
+    const { email, orderId, variantId } = req.body;
+
+    // Validate required fields
+    if (!email || !orderId || !variantId) {
+      return res.status(400).json({
+        error: 'Missing required fields: email, orderId, and variantId are required'
+      });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        error: 'Invalid email format'
+      });
+    }
+
+    console.log(`Processing request for email: ${email}, order: ${orderId}, variant: ${variantId}`);
+
+    // Check if order exists with the given email
+    const existingOrder = await findOrderByEmail(email, orderId);
+
+    if (!existingOrder) {
+      return res.status(404).json({
+        error: 'Order not found with the provided email and order ID'
+      });
+    }
+
+    // Check if size has already been provided for this order
+    if (existingOrder.tags && existingOrder.tags.includes('size-provided')) {
+      return res.status(400).json({
+        error: 'Size has already been provided for this order',
+        message: 'This order has already been processed for ring sizing'
+      });
+    }
+
+    // Create new ring-size order with 100% discount
+    const newOrder = await createRingSizeOrder(email, variantId, existingOrder);
+
+    res.status(200).json({
+      success: true,
+      message: 'Ring-size order created successfully',
+      data: {
+        originalOrder: existingOrder.name,
+        newOrder: newOrder.name,
+        discountApplied: true
+      }
+    });
+
+  } catch (error) {
+    console.error('Error processing request:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Get all orders for a given email
+ */
+async function getOrdersByEmail(email) {
+  try {
+    const shopDomain = process.env.SHOPIFY_SHOP_DOMAIN;
+    const accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
+    const apiVersion = process.env.SHOPIFY_API_VERSION;
+
+    if (!shopDomain || !accessToken) {
+      throw new Error('Shopify configuration missing');
+    }
+
+    // Search for orders by email
+    const searchResponse = await axios.get(
+      `https://${shopDomain}/admin/api/${apiVersion}/orders.json?email=${encodeURIComponent(email)}&status=any&limit=50`,
+      {
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const orders = searchResponse.data.orders.map(order => ({
+      id: order.id,
+      name: order.name,
+      order_number: order.order_number,
+      created_at: order.created_at,
+      total_price: order.total_price,
+      currency: order.currency,
+      financial_status: order.financial_status,
+      fulfillment_status: order.fulfillment_status,
+      tags: order.tags
+    }));
+
+    return orders;
+
+  } catch (error) {
+    console.error('Error getting orders by email:', error);
+    throw new Error(`Failed to get orders: ${error.message}`);
+  }
+}
+
+/**
+ * Get awaiting size items from a specific order
+ */
+async function getAwaitingSizeItems(email, orderId) {
+  try {
+    const shopDomain = process.env.SHOPIFY_SHOP_DOMAIN;
+    const accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
+    const apiVersion = process.env.SHOPIFY_API_VERSION;
+
+    if (!shopDomain || !accessToken) {
+      throw new Error('Shopify configuration missing');
+    }
+
+    // Find the order first
+    const existingOrder = await findOrderByEmail(email, orderId);
+    if (!existingOrder) {
+      throw new Error('Order not found');
+    }
+
+    // Get detailed order information
+    const detailedOrderResponse = await axios.get(
+      `https://${shopDomain}/admin/api/${apiVersion}/orders/${existingOrder.id}.json`,
+      {
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const detailedOrder = detailedOrderResponse.data.order;
+    const awaitingSizeItems = [];
+
+    // Check each line item for "awaiting_size" metafield
+    for (const lineItem of detailedOrder.line_items) {
+      try {
+        // Get metafields for this variant
+        const metafieldsResponse = await axios.get(
+          `https://${shopDomain}/admin/api/${apiVersion}/variants/${lineItem.variant_id}/metafields.json`,
+          {
+            headers: {
+              'X-Shopify-Access-Token': accessToken,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+
+        const metafields = metafieldsResponse.data.metafields;
+        const awaitingSizeMetafield = metafields.find(metafield => 
+          metafield.namespace === 'custom' && 
+          metafield.key === 'awaiting_size' && 
+          metafield.value === true || metafield.value === 'true'
+        );
+
+        if (awaitingSizeMetafield) {
+          // Get product details for this variant
+          const productResponse = await axios.get(
+            `https://${shopDomain}/admin/api/${apiVersion}/products/${lineItem.product_id}.json`,
+            {
+              headers: {
+                'X-Shopify-Access-Token': accessToken,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+
+          const product = productResponse.data.product;
+          const variant = product.variants.find(v => v.id === lineItem.variant_id);
+
+          // Get all variants for this product to show size options
+          const allVariants = product.variants.filter(v => 
+            v.inventory_quantity > 0 && v.available
+          );
+
+          // Group variants by non-size options
+          const options = product.options || [];
+          const sizeOptionIndex = options.findIndex(option => 
+            option.name.toLowerCase().includes('size')
+          );
+
+          // Find variants with same non-size options as the original
+          const originalNonSizeOptions = {};
+          options.forEach((option, index) => {
+            if (index !== sizeOptionIndex) {
+              originalNonSizeOptions[option.name] = variant[`option${index + 1}`];
+            }
+          });
+
+          const sizeVariants = allVariants.filter(v => {
+            let matches = true;
+            options.forEach((option, index) => {
+              if (index !== sizeOptionIndex) {
+                if (v[`option${index + 1}`] !== originalNonSizeOptions[option.name]) {
+                  matches = false;
+                }
+              }
+            });
+            return matches;
+          });
+
+          awaitingSizeItems.push({
+            lineItem: {
+              id: lineItem.id,
+              title: lineItem.title,
+              quantity: lineItem.quantity,
+              price: lineItem.price
+            },
+            product: {
+              id: product.id,
+              title: product.title,
+              handle: product.handle
+            },
+            originalVariant: {
+              id: variant.id,
+              title: variant.title,
+              price: variant.price,
+              sku: variant.sku
+            },
+            sizeVariants: sizeVariants.map(v => ({
+              id: v.id,
+              title: v.title,
+              price: v.price,
+              sku: v.sku,
+              size: sizeOptionIndex >= 0 ? v[`option${sizeOptionIndex + 1}`] : null,
+              inventory_quantity: v.inventory_quantity
+            })),
+            options: options.map(option => ({
+              name: option.name,
+              values: option.values
+            })),
+            sizeOptionIndex,
+            originalNonSizeOptions
+          });
+
+          console.log(`Found awaiting size item: ${product.title} - ${variant.title}`);
+        }
+      } catch (error) {
+        console.error(`Error checking metafields for variant ${lineItem.variant_id}:`, error);
+        // Continue checking other items even if one fails
+      }
+    }
+
+    return awaitingSizeItems;
+
+  } catch (error) {
+    console.error('Error getting awaiting size items:', error);
+    throw new Error(`Failed to get awaiting size items: ${error.message}`);
+  }
+}
+
+/**
+ * Find an order by email and order ID
+ */
+async function findOrderByEmail(email, orderId) {
+  try {
+    const shopDomain = process.env.SHOPIFY_SHOP_DOMAIN;
+    const accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
+    const apiVersion = process.env.SHOPIFY_API_VERSION;
+
+    if (!shopDomain || !accessToken) {
+      throw new Error('Shopify configuration missing');
+    }
+
+    // Search for orders by email
+    const searchResponse = await axios.get(
+      `https://${shopDomain}/admin/api/${apiVersion}/orders.json?email=${encodeURIComponent(email)}&status=any`,
+      {
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const orders = searchResponse.data.orders;
+
+    // Find the specific order by order ID
+    const targetOrder = orders.find(order =>
+      order.order_number.toString() === orderId.toString() ||
+      order.name === orderId.toString()
+    );
+
+    if (!targetOrder) {
+      console.log(`Order ${orderId} not found for email ${email}`);
+      return null;
+    }
+
+    console.log(`Found existing order: ${targetOrder.name}`);
+    return targetOrder;
+
+  } catch (error) {
+    console.error('Error finding order:', error);
+    throw new Error(`Failed to find order: ${error.message}`);
+  }
+}
+
+/**
+ * Create a new ring-size order with 100% discount
+ */
+async function createRingSizeOrder(email, variantId, originalOrder) {
+  try {
+    const shopDomain = process.env.SHOPIFY_SHOP_DOMAIN;
+    const accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
+    const apiVersion = process.env.SHOPIFY_API_VERSION;
+    const discountCode = process.env.DISCOUNT_CODE;
+
+    if (!shopDomain || !accessToken) {
+      throw new Error('Shopify configuration missing');
+    }
+
+    // Get variant details to create the order
+    const variantResponse = await axios.get(
+      `https://${shopDomain}/admin/api/${apiVersion}/variants/${variantId}.json`,
+      {
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const variant = variantResponse.data.variant;
+
+    // Create discount code if it doesn't exist
+    await ensureDiscountCodeExists(discountCode);
+
+    // Create the new order with all original order details
+    const newOrderData = {
+      order: {
+        name: `${originalOrder.name}-Ring-Size-Order`,
+        email: originalOrder.email,
+        phone: originalOrder.phone,
+        currency: originalOrder.currency,
+        presentment_currency: originalOrder.presentment_currency,
+        financial_status: 'paid',
+        fulfillment_status: 'unfulfilled',
+
+        // Customer information
+        customer: originalOrder.customer ? {
+          id: originalOrder.customer.id,
+          email: originalOrder.customer.email,
+          first_name: originalOrder.customer.first_name,
+          last_name: originalOrder.customer.last_name,
+          phone: originalOrder.customer.phone
+        } : null,
+
+        // Billing address
+        billing_address: originalOrder.billing_address ? {
+          first_name: originalOrder.billing_address.first_name,
+          last_name: originalOrder.billing_address.last_name,
+          address1: originalOrder.billing_address.address1,
+          address2: originalOrder.billing_address.address2,
+          city: originalOrder.billing_address.city,
+          province: originalOrder.billing_address.province,
+          country: originalOrder.billing_address.country,
+          zip: originalOrder.billing_address.zip,
+          phone: originalOrder.billing_address.phone
+        } : null,
+
+        // Shipping address
+        shipping_address: originalOrder.shipping_address ? {
+          first_name: originalOrder.shipping_address.first_name,
+          last_name: originalOrder.shipping_address.last_name,
+          address1: originalOrder.shipping_address.address1,
+          address2: originalOrder.shipping_address.address2,
+          city: originalOrder.shipping_address.city,
+          province: originalOrder.shipping_address.province,
+          country: originalOrder.shipping_address.country,
+          zip: originalOrder.shipping_address.zip,
+          phone: originalOrder.shipping_address.phone
+        } : null,
+
+        // Line items - only the selected variant
+        line_items: [
+          {
+            variant_id: parseInt(variantId),
+            quantity: 1,
+            title: variant.title,
+            price: variant.price,
+            sku: variant.sku,
+            requires_shipping: variant.requires_shipping,
+            taxable: variant.taxable,
+            gift_card: variant.gift_card
+          }
+        ],
+
+        // Tags and notes
+        tags: [`original-order:${originalOrder.name}`, 'ring-size-created'],
+        note: `ORDER DETAILS:\n• Original Order: ${originalOrder.name}\n• Customer: ${email}\n• Created: ${new Date().toISOString()}\n• Type: FREE Ring Sizer Order\n• Status: Linked to ${originalOrder.name}`,
+
+        // Discount codes
+        discount_codes: [
+          {
+            code: discountCode,
+            amount: variant.price,
+            type: 'fixed_amount'
+          }
+        ],
+
+        // Custom properties
+        custom_properties: {
+          'ORDER TYPE': 'RING SIZE ORDER',
+          'ORIGINAL ORDER': originalOrder.name,
+          'DISCOUNT': '100% OFF - FREE',
+          'ORIGINAL ORDER DATE': originalOrder.created_at,
+          'ORIGINAL ORDER TOTAL': originalOrder.total_price
+        },
+
+        // Shipping lines (copy from original order if exists)
+        shipping_lines: originalOrder.shipping_lines ? originalOrder.shipping_lines.map(line => ({
+          title: line.title,
+          price: line.price,
+          code: line.code,
+          source: line.source,
+          carrier_identifier: line.carrier_identifier,
+          requested_fulfillment_service_id: line.requested_fulfillment_service_id
+        })) : [],
+
+        // Tax lines (copy from original order if exists)
+        tax_lines: originalOrder.tax_lines ? originalOrder.tax_lines.map(line => ({
+          title: line.title,
+          price: line.price,
+          rate: line.rate,
+          price_set: line.price_set
+        })) : [],
+
+        // Note attributes (copy from original order if exists)
+        note_attributes: originalOrder.note_attributes ? originalOrder.note_attributes.map(attr => ({
+          name: attr.name,
+          value: attr.value
+        })) : []
+      }
+    };
+
+    // Create the order
+    const orderResponse = await axios.post(
+      `https://${shopDomain}/admin/api/${apiVersion}/orders.json`,
+      newOrderData,
+      {
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const newOrder = orderResponse.data.order;
+
+    // The order name is already set during creation, no need for complex updates
+    console.log(`Created ring-size order: ${newOrder.name}`);
+    console.log(`Order ID: ${newOrder.id}, Order Number: ${newOrder.order_number}, Order Name: ${newOrder.name}`);
+
+    // Tag the original order as "size-provided" to prevent double submissions
+    await axios.put(
+      `https://${shopDomain}/admin/api/${apiVersion}/orders/${originalOrder.id}.json`,
+      {
+        order: {
+          id: originalOrder.id,
+          tags: `${originalOrder.tags || ''}, size-provided`.trim().replace(/^,/, '').replace(/,$/, '')
+        }
+      },
+      {
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    console.log(`Tagged original order ${originalOrder.name} as size-provided`);
+
+    // Log the final order details for debugging
+    const finalOrderResponse = await axios.get(
+      `https://${shopDomain}/admin/api/${apiVersion}/orders/${newOrder.id}.json`,
+      {
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    console.log(`Final order details:`, {
+      id: finalOrderResponse.data.order.id,
+      name: finalOrderResponse.data.order.name,
+      order_number: finalOrderResponse.data.order.order_number,
+      tags: finalOrderResponse.data.order.tags
+    });
+
+    return newOrder;
+
+  } catch (error) {
+    console.error('Error creating ring-size order:', error);
+    throw new Error(`Failed to create ring-size order: ${error.message}`);
+  }
+}
+
+/**
+ * Ensure the discount code exists, create if it doesn't
+ */
+async function ensureDiscountCodeExists(discountCode) {
+  try {
+    const shopDomain = process.env.SHOPIFY_SHOP_DOMAIN;
+    const accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
+    const apiVersion = process.env.SHOPIFY_API_VERSION;
+
+    // Check if discount code exists
+    try {
+      await axios.get(
+        `https://${shopDomain}/admin/api/${apiVersion}/price_rules.json?title=${encodeURIComponent(discountCode)}`,
+        {
+          headers: {
+            'X-Shopify-Access-Token': accessToken,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+    } catch (error) {
+      // Create the discount code if it doesn't exist
+      const discountData = {
+        price_rule: {
+          title: discountCode,
+          target_type: 'line_item',
+          target_selection: 'entitled',
+          allocation_method: 'across',
+          value_type: 'fixed_amount',
+          value: '-100.00',
+          customer_selection: 'all',
+          starts_at: new Date().toISOString(),
+          usage_limit: null
+        }
+      };
+
+      await axios.post(
+        `https://${shopDomain}/admin/api/${apiVersion}/price_rules.json`,
+        discountData,
+        {
+          headers: {
+            'X-Shopify-Access-Token': accessToken,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      console.log(`Created discount code: ${discountCode}`);
+    }
+
+  } catch (error) {
+    console.error('Error ensuring discount code exists:', error);
+    // Don't throw error here as it's not critical for order creation
+  }
+}
+
+/**
+ * Get variant options for a product, focusing on size selection
+ * This function retrieves all variants and identifies which ones have "Awaiting Size" status
+ */
+async function getVariantOptionsForProduct(productId) {
+  try {
+    const shopDomain = process.env.SHOPIFY_SHOP_DOMAIN;
+    const accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
+    const apiVersion = process.env.SHOPIFY_API_VERSION;
+
+    if (!shopDomain || !accessToken) {
+      throw new Error('Shopify configuration missing');
+    }
+
+    // Get product details with all variants
+    const productResponse = await axios.get(
+      `https://${shopDomain}/admin/api/${apiVersion}/products/${productId}.json`,
+      {
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const product = productResponse.data.product;
+    const variants = product.variants;
+
+    // Get product options (like Size, Color, etc.)
+    const options = product.options || [];
+
+    // Find the size option index
+    const sizeOptionIndex = options.findIndex(option =>
+      option.name.toLowerCase().includes('size')
+    );
+
+    // Group variants by their non-size options
+    const variantGroups = {};
+
+    variants.forEach(variant => {
+      // Create a key based on all options except size
+      const nonSizeOptions = [];
+
+      options.forEach((option, index) => {
+        if (index !== sizeOptionIndex) {
+          const optionValue = variant[`option${index + 1}`];
+          if (optionValue) {
+            nonSizeOptions.push(`${option.name}: ${optionValue}`);
+          }
+        }
+      });
+
+      const groupKey = nonSizeOptions.sort().join(' | ');
+
+      if (!variantGroups[groupKey]) {
+        variantGroups[groupKey] = {
+          groupKey,
+          nonSizeOptions,
+          variants: []
+        };
+      }
+
+      variantGroups[groupKey].variants.push({
+        id: variant.id,
+        title: variant.title,
+        price: variant.price,
+        sku: variant.sku,
+        inventory_quantity: variant.inventory_quantity,
+        available: variant.inventory_quantity > 0,
+        size: sizeOptionIndex >= 0 ? variant[`option${sizeOptionIndex + 1}`] : null,
+        sizeOptionIndex
+      });
+    });
+
+    // Filter to only show groups that have variants with "Awaiting Size" or similar status
+    const availableGroups = Object.values(variantGroups).filter(group => {
+      return group.variants.some(variant =>
+        variant.available &&
+        variant.inventory_quantity > 0
+      );
+    });
+
+    return {
+      product: {
+        id: product.id,
+        title: product.title,
+        handle: product.handle,
+        options: options.map(option => ({
+          id: option.id,
+          name: option.name,
+          position: option.position,
+          values: option.values
+        }))
+      },
+      sizeOptionIndex,
+      variantGroups: availableGroups,
+      allVariants: variants.map(variant => ({
+        id: variant.id,
+        title: variant.title,
+        price: variant.price,
+        sku: variant.sku,
+        inventory_quantity: variant.inventory_quantity,
+        available: variant.inventory_quantity > 0,
+        options: options.map((option, index) => ({
+          name: option.name,
+          value: variant[`option${index + 1}`]
+        }))
+      }))
+    };
+
+  } catch (error) {
+    console.error('Error getting variant options:', error);
+    throw new Error(`Failed to get variant options: ${error.message}`);
+  }
+}
